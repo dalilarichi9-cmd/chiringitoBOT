@@ -2,6 +2,7 @@ import discord
 from discord.ext import commands
 import requests
 import os
+from datetime import datetime
 from keep_alive import keep_alive
 
 # Configuración de los Intents de Discord
@@ -18,7 +19,7 @@ FOOTBALL_API_KEY = os.getenv('FOOTBALL_API_KEY')
 HEADERS = {
     'x-apisports-key': FOOTBALL_API_KEY
 }
-BASE_URL = "https://api-sports.io"
+BASE_URL = "https://v3.football.api-sports.io"
 
 # Diccionario de ligas comerciales mapeado a sus IDs oficiales
 LIGAS = {
@@ -47,8 +48,8 @@ LIGAS = {
 }
 
 DEFAULT_LEAGUE_ID = 140
-# 📅 Cambiado a 2025 para que coincida con la temporada en curso indexada por la API
-CURRENT_SEASON = 2025
+# 📅 Temporada ajustada al año de inicio activo en el servidor
+CURRENT_SEASON = 2026
 
 def obtener_league_id(nombre_liga: str) -> int:
     """Busca la liga limpiando el texto si el usuario escribe algo."""
@@ -94,13 +95,16 @@ async def tabla(ctx, *, liga: str = ""):
         response = requests.get(url, headers=HEADERS, params=params).json()
         raw_response = response.get('response', [])
         
-        if not raw_response:
-            await ctx.send(f"❌ No se encontró la clasificación para la temporada {CURRENT_SEASON}.")
+        if not raw_response or len(raw_response) == 0:
+            await ctx.send(f"❌ No hay datos de tabla disponibles para la liga en la temporada {CURRENT_SEASON}.")
             return
             
-        league_data = raw_response[0]['league']
-        league_name = league_data['name']
-        standings = league_data['standings'][0]
+        # 🛠️ CORRECCIÓN DE FILTRADO: Acceso exacto response[0] -> league
+        league_info = raw_response[0]['league']
+        league_name = league_info['name']
+        
+        # Estructura oficial anidada: standings es una lista de listas, extraemos el índice 0
+        standings = league_info['standings'][0]
         
         embed = discord.Embed(title=f"📊 Clasificación: {league_name} ({CURRENT_SEASON})", color=discord.Color.blue())
         
@@ -138,11 +142,12 @@ async def jornada(ctx, *, liga: str = ""):
         round_resp = requests.get(round_url, headers=HEADERS, params=round_params).json()
         current_round = round_resp.get('response', [])
         
-        if not current_round:
-            await ctx.send("❌ No se pudo determinar la jornada activa.")
+        if not current_round or len(current_round) == 0:
+            await ctx.send("❌ No se pudo determinar la jornada activa en los servidores.")
             return
             
-        round_name = current_round[0] if isinstance(current_round, list) else current_round
+        # 🛠️ CORRECCIÓN: Las rondas devuelven una lista de strings. Extraemos el primer texto.
+        round_name = current_round[0]
         
         fixtures_url = f"{BASE_URL}/fixtures"
         fixtures_params = {'league': league_id, 'season': CURRENT_SEASON, 'round': round_name}
@@ -157,8 +162,9 @@ async def jornada(ctx, *, liga: str = ""):
             status = match['fixture']['status']['short']
             
             if status in ['NS', 'TBD']:
-                match_date = match['fixture']['date'].split('T')[0]
-                value = f"🕒 Fecha: {match_date} (Por jugar)"
+                # Simplificación de fecha para evitar rotura por nulos
+                raw_date = match['fixture']['date'][:10]
+                value = f"🕒 Fecha: {raw_date} (Por jugar)"
             else:
                 home_g = match['goals']['home']
                 away_g = match['goals']['away']
