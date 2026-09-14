@@ -1,4 +1,3 @@
-# bot.py
 import discord
 from discord.ext import commands
 import requests
@@ -12,73 +11,258 @@ intents.message_content = True
 
 bot = commands.Bot(command_prefix='!', intents=intents)
 
-# Variables de Entorno (Se configuran en Render)
+# Variables de Entorno de Render
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
 FOOTBALL_API_KEY = os.getenv('FOOTBALL_API_KEY')
+
+HEADERS = {
+    'x-rapidapi-host': 'v3.football.api-sports.io',
+    'x-rapidapi-key': FOOTBALL_API_KEY
+}
+BASE_URL = "https://api-sports.io"
+
+# 🔍 DICCIONARIO DE LIGAS OPTIMIZADO: Mapea los nombres comerciales a los IDs oficiales de la API
+LIGAS = {
+    # Primera División de España (ID: 140)
+    "laliga": 140,
+    "laligaeasports": 140,
+    "easports": 140,
+    "primera": 140,
+    "primeradivision": 140,
+    "espana": 140,
+    
+    # Segunda División de España (ID: 141)
+    "laligahypermotion": 141,
+    "hypermotion": 141,
+    "laliga2": 141,
+    "segunda": 141,
+    "segundadivision": 141,
+    
+    # Otras ligas populares
+    "premier": 39,
+    "inglaterra": 39,
+    "seriea": 135,
+    "bundesliga": 78,
+    "ligue1": 61,
+    "champions": 2,
+    "ucl": 2,
+    "ligamx": 262,
+    "mexico": 262
+}
+
+DEFAULT_LEAGUE_ID = 140
+CURRENT_SEASON = datetime.today().year if datetime.today().month > 6 else datetime.today().year - 1
+
+def obtener_league_id(nombre_liga: str) -> int:
+    """Busca la liga limpiando mayúsculas, espacios, guiones y acentos."""
+    if not nombre_liga:
+        return DEFAULT_LEAGUE_ID
+    
+    nombre_limpio = (nombre_liga.lower()
+                     .strip()
+                     .replace(" ", "")
+                     .replace("-", "")
+                     .replace("á", "a")
+                     .replace("é", "e")
+                     .replace("í", "i")
+                     .replace("ó", "o")
+                     .replace("ú", "u"))
+    
+    return LIGAS.get(nombre_limpio, None)
+
 
 @bot.event
 async def on_ready():
     print(f'Conectado exitosamente como {bot.user.name}')
 
-@bot.command(name='partidos')
-async def partidos(ctx, league_id: int = 140): # Por defecto 140 es LaLiga de España
-    """Muestra los partidos del día de hoy para una liga específica."""
-    await ctx.send("⚽ Buscando partidos de hoy... Por favor, espera.")
+@bot.event
+async def on_command_completion(ctx):
+    print(f'✅ Comando !{ctx.command.name} ejecutado con éxito por {ctx.author}')
+
+
+@bot.command(name='tabla')
+async def tabla(ctx, *, liga: str = ""):
+    """Muestra la clasificación/tabla de posiciones usando el nombre de la liga."""
+    league_id = obtener_league_id(liga)
     
-    url = "https://api-sports.io"
-    today = datetime.today().strftime('%Y-%m-%d')
-    
-    headers = {
-        'x-rapidapi-host': 'v3.football.api-sports.io',
-        'x-rapidapi-key': FOOTBALL_API_KEY
-    }
-    
-    params = {
-        'date': today,
-        'league': league_id,
-        'season': datetime.today().year if datetime.today().month > 6 else datetime.today().year - 1
-    }
+    if league_id is None:
+        await ctx.send(f"❌ No reconozco la liga '{liga}'. Intenta con: `laliga`, `hypermotion`, `premier`...")
+        return
+
+    await ctx.send("📊 Buscando la clasificación... Por favor, espera.")
+    url = f"{BASE_URL}/standings"
+    params = {'league': league_id, 'season': CURRENT_SEASON}
     
     try:
-        response = requests.get(url, headers=headers, params=params).json()
+        response = requests.get(url, headers=HEADERS, params=params).json()
+        standings_data = response.get('response', [])
+        
+        if not standings_data:
+            await ctx.send("❌ No se encontró la clasificación para esta liga o temporada.")
+            return
+            
+        league_name = standings_data[0]['league']['name']
+        # La API encapsula la lista de clasificaciones dentro de 'standings'
+        standings = standings_data[0]['league']['standings'][0]
+        
+        embed = discord.Embed(title=f"📊 Clasificación: {league_name} ({CURRENT_SEASON})", color=discord.Color.blue())
+        
+        descripcion = f"`Pos. Equipo          | PJ | Pts | DG`\n"
+        for team in standings[:15]:  # Ampliado a 15 para ver una perspectiva más amplia en Segunda
+            rank = str(team['rank']).ljust(3)
+            name = team['team']['name'][:13].ljust(15)
+            pj = str(team['all']['played']).ljust(2)
+            pts = str(team['points']).ljust(3)
+            dg = str(team['goalsDiff']).ljust(3)
+            descripcion += f"`{rank} {name} | {pj} | {pts} | {dg}`\n"
+            
+        embed.description = descripcion
+        embed.set_footer(text="Usa !tabla [nombre_liga] para cambiar de liga.")
+        await ctx.send(embed=embed)
+    except Exception as e:
+        print(e)
+        await ctx.send("❌ Ocurrió un error al consultar la tabla.")
+
+
+@bot.command(name='jornada')
+async def jornada(ctx, *, liga: str = ""):
+    """Busca los partidos de la jornada actual usando el nombre de la liga."""
+    league_id = obtener_league_id(liga)
+    
+    if league_id is None:
+        await ctx.send(f"❌ No reconozco la liga '{liga}'.")
+        return
+
+    await ctx.send("🕒 Buscando los partidos de la jornada actual... Por favor, espera.")
+    
+    try:
+        # 1. Obtener la jornada (round) actual
+        round_url = f"{BASE_URL}/fixtures/rounds"
+        round_params = {'league': league_id, 'season': CURRENT_SEASON, 'current': 'true'}
+        round_resp = requests.get(round_url, headers=HEADERS, params=round_params).json()
+        current_round = round_resp.get('response', [])
+        
+        if not current_round:
+            await ctx.send("❌ No se pudo determinar la jornada actual.")
+            return
+            
+        round_name = current_round[0]
+        
+        # 2. Buscar los partidos pertenecientes a esa jornada específica
+        fixtures_url = f"{BASE_URL}/fixtures"
+        fixtures_params = {'league': league_id, 'season': CURRENT_SEASON, 'round': round_name}
+        fixtures_resp = requests.get(fixtures_url, headers=HEADERS, params=fixtures_params).json()
+        fixtures = fixtures_resp.get('response', [])
+        
+        embed = discord.Embed(title=f"📅 Partidos - {round_name}", color=discord.Color.orange())
+        
+        for match in fixtures[:11]:  # Capacidad para cubrir los 11 partidos de Hypermotion
+            home = match['teams']['home']['name']
+            away = match['teams']['away']['name']
+            status = match['fixture']['status']['short']
+            
+            if status in ['NS', 'TBD']:
+                # Formatear fecha y hora UTC simplificada
+                match_date = match['fixture']['date'].split('T')[0]
+                match_time = match['fixture']['date'].split('T')[1][:5]
+                value = f"🕒 {match_date} - {match_time} UTC (Por jugar)"
+            else:
+                home_g = match['goals']['home']
+                away_g = match['goals']['away']
+                value = f"⚽ Resultado: **{home_g} - {away_g}** ({status})"
+                
+            embed.add_field(name=f"{home} vs {away}", value=value, inline=False)
+            
+        await ctx.send(embed=embed)
+    except Exception as e:
+        print(e)
+        await ctx.send("❌ Ocurrió un error al obtener la jornada.")
+
+
+@bot.command(name='resultados')
+async def resultados(ctx, *, liga: str = ""):
+    """Muestra los últimos 5 resultados usando el nombre de la liga."""
+    league_id = obtener_league_id(liga)
+    
+    if league_id is None:
+        await ctx.send(f"❌ No reconozco la liga '{liga}'.")
+        return
+
+    await ctx.send("🏁 Buscando los últimos resultados... Por favor, espera.")
+    url = f"{BASE_URL}/fixtures"
+    params = {'league': league_id, 'season': CURRENT_SEASON, 'last': 5}
+    
+    try:
+        response = requests.get(url, headers=HEADERS, params=params).json()
         fixtures = response.get('response', [])
         
         if not fixtures:
-            await ctx.send(f"📅 No hay partidos programados para hoy en esta liga (ID: {league_id}).")
+            await ctx.send("❌ No se encontraron resultados recientes.")
             return
             
-        embed = discord.Embed(title=f"🏆 Partidos de Hoy", color=discord.Color.green())
+        embed = discord.Embed(title="🏁 Últimos Resultados", color=discord.Color.red())
         
         for match in fixtures:
-            home_team = match['teams']['home']['name']
-            away_team = match['teams']['away']['name']
-            status = match['fixture']['status']['short']
-            
-            # Si el partido ya empezó o terminó, muestra goles
-            if status in ['1H', '2H', 'HT', 'FT']:
-                home_goals = match['goals']['home']
-                away_goals = match['goals']['away']
-                score = f"[{home_goals} - {away_goals}]"
-            else:
-                # Mostrar hora del partido en UTC
-                match_time = match['fixture']['date'].split('T')[1][:5]
-                score = f"🕒 {match_time} UTC"
-                
+            home = match['teams']['home']['name']
+            away = match['teams']['away']['name']
+            home_g = match['goals']['home']
+            away_g = match['goals']['away']
             embed.add_field(
-                name=f"{home_team} vs {away_team}",
-                value=f"Estado: {status} | Resultado: {score}",
+                name=f"{home} vs {away}", 
+                value=f"Marcador final: **{home_g} - {away_g}**", 
                 inline=False
             )
             
         await ctx.send(embed=embed)
-        
     except Exception as e:
         print(e)
-        await ctx.send("❌ Error al conectar con la API de fútbol.")
+        await ctx.send("❌ Ocurrió un error al consultar los resultados.")
 
-# Iniciar servidor web para Render antes de arrancar el bot
+
+@bot.command(name='estadisticas')
+async def estadisticas(ctx, fixture_id: int):
+    """Muestra las estadísticas de juego usando el ID numérico del partido."""
+    await ctx.send(f"📊 Buscando estadísticas del partido {fixture_id}... Por favor, espera.")
+    url = f"{BASE_URL}/fixtures/statistics"
+    params = {'fixture': fixture_id}
+    
+    try:
+        response = requests.get(url, headers=HEADERS, params=params).json()
+        stats_data = response.get('response', [])
+        
+        if not stats_data or len(stats_data) < 2:
+            await ctx.send("❌ No hay estadísticas disponibles. Asegúrate de ingresar un ID válido que obtengas de `!jornada`.")
+            return
+            
+        team1_data = stats_data[0]
+        team2_data = stats_data[1]
+        
+        team1 = team1_data['team']['name']
+        team2 = team2_data['team']['name']
+        
+        embed = discord.Embed(title=f"📊 Estadísticas del Encuentro", description=f"**{team1} vs {team2}**", color=discord.Color.purple())
+        
+        t1_stats = {s['type']: s['value'] for s in team1_data['statistics']}
+        t2_stats = {s['type']: s['value'] for s in team2_data['statistics']}
+        
+        metricas = [
+            ('Ball Possession', 'Posesión'),
+            ('Total Shots', 'Remates Totales'),
+            ('Shots on Goal', 'Tiros al Arco'),
+            ('Corner Kicks', 'Córners'),
+            ('Fouls', 'Faltas')
+        ]
+        
+        for api_key, nombre_es in metricas:
+            v1 = t1_stats.get(api_key, 0) or 0
+            v2 = t2_stats.get(api_key, 0) or 0
+            embed.add_field(name=nombre_es, value=f"{team1}: **{v1}** | {team2}: **{v2}**", inline=False)
+            
+        await ctx.send(embed=embed)
+    except Exception as e:
+        print(e)
+        await ctx.send("❌ Error al procesar las estadísticas.")
+
+# Iniciar servidor
 keep_alive()
-
-# Ejecutar el bot
 bot.run(DISCORD_TOKEN)
-
