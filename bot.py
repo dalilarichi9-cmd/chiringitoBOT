@@ -2,7 +2,6 @@ import discord
 from discord.ext import commands
 import requests
 import os
-from datetime import datetime
 from keep_alive import keep_alive
 
 # Configuración de los Intents de Discord
@@ -19,7 +18,7 @@ FOOTBALL_API_KEY = os.getenv('FOOTBALL_API_KEY')
 HEADERS = {
     'x-apisports-key': FOOTBALL_API_KEY
 }
-BASE_URL = "https://v3.football.api-sports.io"
+BASE_URL = "https://api-sports.io"
 
 # Diccionario de ligas comerciales mapeado a sus IDs oficiales
 LIGAS = {
@@ -48,8 +47,8 @@ LIGAS = {
 }
 
 DEFAULT_LEAGUE_ID = 140
-# 📅 Temporada establecida en el año actual para las ligas activas
-CURRENT_SEASON = 2026
+# 📅 Cambiado a 2025 para que coincida con la temporada en curso indexada por la API
+CURRENT_SEASON = 2025
 
 def obtener_league_id(nombre_liga: str) -> int:
     """Busca la liga limpiando el texto si el usuario escribe algo."""
@@ -99,12 +98,9 @@ async def tabla(ctx, *, liga: str = ""):
             await ctx.send(f"❌ No se encontró la clasificación para la temporada {CURRENT_SEASON}.")
             return
             
-        # 🛠️ CORRECCIÓN DE LA ESTRUCTURA INTERNA DEL JSON:
-        league_info = raw_response[0]['league']
-        league_name = league_info['name']
-        
-        # Las ligas estándar devuelven una lista de tablas dentro del campo standings, extraemos la primera [0]
-        standings = league_info['standings'][0]
+        league_data = raw_response[0]['league']
+        league_name = league_data['name']
+        standings = league_data['standings'][0]
         
         embed = discord.Embed(title=f"📊 Clasificación: {league_name} ({CURRENT_SEASON})", color=discord.Color.blue())
         
@@ -121,7 +117,7 @@ async def tabla(ctx, *, liga: str = ""):
         embed.set_footer(text="Usa !tabla [nombre_liga] para cambiar de competición.")
         await ctx.send(embed=embed)
     except Exception as e:
-        print(f"Error en tabla: {e}")
+        print(f"Error detallado en tabla: {e}")
         await ctx.send("❌ Ocurrió un error al procesar los datos de la clasificación.")
 
 
