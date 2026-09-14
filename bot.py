@@ -47,7 +47,7 @@ LIGAS = {
     "mexico": 262
 }
 
-DEFAULT_LEAGUE_ID = 140
+CURRENT_SEASON = 2026
 CURRENT_SEASON = datetime.today().year if datetime.today().month > 6 else datetime.today().year - 1
 
 def obtener_league_id(nombre_liga: str) -> int:
