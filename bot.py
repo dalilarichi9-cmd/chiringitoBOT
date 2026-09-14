@@ -48,8 +48,8 @@ LIGAS = {
 }
 
 DEFAULT_LEAGUE_ID = 140
+# 📅 Temporada fijada en el año de inicio actual (2026)
 CURRENT_SEASON = 2026
-
 
 def obtener_league_id(nombre_liga: str) -> int:
     """Busca la liga limpiando el texto si el usuario escribe algo."""
@@ -93,14 +93,16 @@ async def tabla(ctx, *, liga: str = ""):
     
     try:
         response = requests.get(url, headers=HEADERS, params=params).json()
-        standings_data = response.get('response', [])
+        raw_response = response.get('response', [])
         
-        if not standings_data:
-            await ctx.send("❌ No se encontró la clasificación para esta liga en la temporada actual.")
+        if not raw_response:
+            await ctx.send(f"❌ No se encontró la clasificación para la temporada {CURRENT_SEASON}.")
             return
             
-        league_info = standings_data[0]['league']
+        # Corrección en la extracción de la estructura del JSON de la API
+        league_info = raw_response[0]['league']
         league_name = league_info['name']
+        # La API devuelve una lista anidada dentro del nodo standings
         standings = league_info['standings'][0]
         
         embed = discord.Embed(title=f"📊 Clasificación: {league_name} ({CURRENT_SEASON})", color=discord.Color.blue())
@@ -119,7 +121,7 @@ async def tabla(ctx, *, liga: str = ""):
         await ctx.send(embed=embed)
     except Exception as e:
         print(f"Error en tabla: {e}")
-        await ctx.send("❌ Ocurrió un error al consultar la tabla en los servidores de fútbol.")
+        await ctx.send("❌ Ocurrió un error al procesar los datos de la clasificación.")
 
 
 @bot.command(name='jornada')
@@ -143,7 +145,7 @@ async def jornada(ctx, *, liga: str = ""):
             await ctx.send("❌ No se pudo determinar la jornada activa.")
             return
             
-        round_name = current_round[0]
+        round_name = current_round[0] if isinstance(current_round, list) else current_round
         
         fixtures_url = f"{BASE_URL}/fixtures"
         fixtures_params = {'league': league_id, 'season': CURRENT_SEASON, 'round': round_name}
