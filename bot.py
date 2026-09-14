@@ -48,7 +48,7 @@ LIGAS = {
 }
 
 DEFAULT_LEAGUE_ID = 140
-# 📅 Temporada fijada en el año de inicio actual (2026)
+# 📅 Temporada establecida en el año actual para las ligas activas
 CURRENT_SEASON = 2026
 
 def obtener_league_id(nombre_liga: str) -> int:
@@ -99,10 +99,11 @@ async def tabla(ctx, *, liga: str = ""):
             await ctx.send(f"❌ No se encontró la clasificación para la temporada {CURRENT_SEASON}.")
             return
             
-        # Corrección en la extracción de la estructura del JSON de la API
+        # 🛠️ CORRECCIÓN DE LA ESTRUCTURA INTERNA DEL JSON:
         league_info = raw_response[0]['league']
         league_name = league_info['name']
-        # La API devuelve una lista anidada dentro del nodo standings
+        
+        # Las ligas estándar devuelven una lista de tablas dentro del campo standings, extraemos la primera [0]
         standings = league_info['standings'][0]
         
         embed = discord.Embed(title=f"📊 Clasificación: {league_name} ({CURRENT_SEASON})", color=discord.Color.blue())
